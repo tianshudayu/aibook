@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 
 # --- 🔴 配置区 ---
 # 替换为你的真实 Key
-DEEPSEEK_API_KEY = "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" 
+DEEPSEEK_API_KEY = "sk-748df802a9ba4528a5b5fea7b7a7d53f" 
 DB_FILE = "app.db"
 
 # --- 1. 数据库初始化 (核心修复：确保一定会运行) ---
