@@ -7,32 +7,28 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse 
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from contextlib import asynccontextmanager
 
 # --- 🔴 配置区 ---
-# 替换为你的真实 Key
+# ⚠️ 必须修改：把 sk-xxx 换成你自己的真实 Key
 DEEPSEEK_API_KEY = "sk-748df802a9ba4528a5b5fea7b7a7d53f" 
 DB_FILE = "app.db"
 
-# --- 1. 数据库初始化 (核心修复：确保一定会运行) ---
+# --- 1. 数据库初始化 ---
 def init_db():
     print("正在初始化数据库...")
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, credits INTEGER DEFAULT 0)''')
+        # 🟢 修改点 1：默认值改为 5 (虽然主要靠 get_balance 控制，但这层也是保障)
+        cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, credits INTEGER DEFAULT 5)''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS orders (order_id TEXT PRIMARY KEY, user_id TEXT, amount REAL, status TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
         conn.commit()
     print(f"✅ 数据库就绪: {DB_FILE}")
 
+# 强制执行初始化
+init_db()
+
 # --- 2. 核心设置 ---
-
-# 生命周期管理器：在 App 启动前先运行数据库初始化
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db() # 👈 移到了这里，确保云端启动时也会执行
-    yield
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,8 +53,11 @@ def get_balance(user_id: str) -> int:
         cursor.execute("SELECT credits FROM users WHERE user_id = ?", (user_id,))
         row = cursor.fetchone()
         if row: return row[0]
-        cursor.execute("INSERT INTO users VALUES (?, ?)", (user_id, 0))
-        return 0
+        
+        # 🟢 修改点 2：新用户来访，直接插入 5 点灵力
+        initial_credits = 5 
+        cursor.execute("INSERT INTO users VALUES (?, ?)", (user_id, initial_credits))
+        return initial_credits
 
 def update_balance(user_id: str, change: int):
     with sqlite3.connect(DB_FILE) as conn:
@@ -70,7 +69,7 @@ def update_balance(user_id: str, change: int):
 def read_root():
     return FileResponse('index.html')
 
-# 图片服务接口
+# 图片服务接口 (你的收款码)
 @app.get("/{filename}")
 def get_image(filename: str):
     if filename.endswith(".jpg") and os.path.exists(filename):
@@ -110,7 +109,6 @@ def chat(req: ChatRequest):
 @app.post("/api/pay")
 def pay(req: PayRequest):
     order_id = f"TRUST-{random.randint(100000, 999999)}"
-    # 这里会用到 orders 表，之前报错就是因为没这张表
     with sqlite3.connect(DB_FILE) as conn:
         conn.execute("INSERT INTO orders (order_id, user_id, amount, status) VALUES (?, ?, ?, ?)", 
                      (order_id, req.user_id, req.amount, "TRUST_PAID"))
@@ -119,5 +117,4 @@ def pay(req: PayRequest):
     return {"status": "success", "msg": f"感谢信任！已增加 {points} 点灵力", "new_balance": get_balance(req.user_id)}
 
 if __name__ == "__main__":
-    # 本地运行时保留这行
     uvicorn.run(app, host="0.0.0.0", port=8000)
