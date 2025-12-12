@@ -8,23 +8,37 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# --- 🔴 配置区 ---
-# ⚠️ 必须修改：把 sk-xxx 换成你自己的真实 Key
+# --- 🔴 配置区 (请填写你的 Key) ---
 DEEPSEEK_API_KEY = "sk-748df802a9ba4528a5b5fea7b7a7d53f" 
 DB_FILE = "app.db"
 
-# --- 1. 数据库初始化 ---
+# --- 1. 数据库初始化 (修复版：强制执行) ---
 def init_db():
     print("正在初始化数据库...")
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        # 🟢 修改点 1：默认值改为 5 (虽然主要靠 get_balance 控制，但这层也是保障)
-        cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, credits INTEGER DEFAULT 5)''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS orders (order_id TEXT PRIMARY KEY, user_id TEXT, amount REAL, status TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        # 用户表：默认给 5 点灵力
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                credits INTEGER DEFAULT 5
+            )
+        ''')
+        # 订单表：修复了之前报错找不到这张表的问题
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS orders (
+                order_id TEXT PRIMARY KEY, 
+                user_id TEXT, 
+                amount REAL, 
+                status TEXT, 
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         conn.commit()
-    print(f"✅ 数据库就绪: {DB_FILE}")
+    print(f"✅ 数据库表结构已确保存在: {DB_FILE}")
 
-# 强制执行初始化
+# 🔥【核心修复】直接在全局运行初始化
+# 这样云端启动时，第一件事就是建表，绝对不会跳过
 init_db()
 
 # --- 2. 核心设置 ---
@@ -54,8 +68,8 @@ def get_balance(user_id: str) -> int:
         row = cursor.fetchone()
         if row: return row[0]
         
-        # 🟢 修改点 2：新用户来访，直接插入 5 点灵力
-        initial_credits = 5 
+        # 新用户：直接给 5 点
+        initial_credits = 5
         cursor.execute("INSERT INTO users VALUES (?, ?)", (user_id, initial_credits))
         return initial_credits
 
@@ -69,7 +83,7 @@ def update_balance(user_id: str, change: int):
 def read_root():
     return FileResponse('index.html')
 
-# 图片服务接口 (你的收款码)
+# 图片服务：让前端能拿到 wechat.jpg 和 alipay.jpg
 @app.get("/{filename}")
 def get_image(filename: str):
     if filename.endswith(".jpg") and os.path.exists(filename):
@@ -86,6 +100,7 @@ def chat(req: ChatRequest):
     if balance <= 0: raise HTTPException(status_code=402, detail="余额不足")
     update_balance(req.user_id, -1)
     
+    # DeepSeek 调用
     try:
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         data = {
@@ -97,23 +112,31 @@ def chat(req: ChatRequest):
             "stream": False
         }
         resp = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data, timeout=30)
+        
         if resp.status_code == 200:
             ai_reply = resp.json()['choices'][0]['message']['content']
         else:
-            ai_reply = "星象模糊，请稍后再试。"
-    except:
+            print(f"DeepSeek API Error: {resp.text}")
+            ai_reply = "星象模糊，请稍后再试。(API Key可能无效)"
+    except Exception as e:
+        print(f"Network Error: {e}")
         ai_reply = "连接宇宙失败。"
 
     return {"answer": ai_reply, "remaining_credits": get_balance(req.user_id)}
 
 @app.post("/api/pay")
 def pay(req: PayRequest):
+    # 记录订单
     order_id = f"TRUST-{random.randint(100000, 999999)}"
     with sqlite3.connect(DB_FILE) as conn:
+        # 这里之前报错是因为表不存在，现在 init_db() 强制运行了，就不会报错了
         conn.execute("INSERT INTO orders (order_id, user_id, amount, status) VALUES (?, ?, ?, ?)", 
                      (order_id, req.user_id, req.amount, "TRUST_PAID"))
+    
+    # 充值到账
     points = 10 if req.amount < 15 else 30
     update_balance(req.user_id, points)
+    
     return {"status": "success", "msg": f"感谢信任！已增加 {points} 点灵力", "new_balance": get_balance(req.user_id)}
 
 if __name__ == "__main__":
