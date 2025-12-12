@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 灵感之书</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #111827; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .glass-effect { background: rgba(31, 41, 55, 0.9); backdrop-filter: blur(12px); }
+        .slide-up { animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    </style>
+</head>
+<body class="text-white font-sans antialiased h-screen flex justify-center bg-gray-900">
+
+    <div id="app" class="w-full max-w-md h-full flex flex-col bg-gray-900 shadow-2xl relative">
+        <!-- 顶部 -->
+        <div class="h-14 flex items-center justify-between px-4 border-b border-gray-800 glass-effect z-10">
+            <span class="font-bold text-lg bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-500">🔮 灵感之书</span>
+            <div class="flex items-center gap-2 text-sm bg-gray-800 px-3 py-1 rounded-full border border-gray-700">
+                <span class="text-yellow-400 font-mono">{{ credits }}</span>
+                <span class="text-gray-400 text-xs">灵力</span>
+            </div>
+        </div>
+
+        <!-- 聊天区 -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar" ref="chatContainer">
+            <div v-if="messages.length === 0" class="mt-20 text-center text-gray-600">
+                <div class="text-4xl mb-2">🌌</div>
+                <p class="text-sm">向宇宙提问，寻找指引</p>
+            </div>
+            
+            <div v-for="(msg, i) in messages" :key="i" class="flex flex-col gap-1">
+                <div :class="['max-w-[85%] px-4 py-3 text-sm rounded-2xl shadow-lg', 
+                    msg.role === 'user' ? 'self-end bg-purple-600 text-white rounded-br-sm' : 'self-start bg-gray-800 text-gray-200 border border-gray-700 rounded-bl-sm']">
+                    {{ msg.content }}
+                </div>
+            </div>
+        </div>
+
+        <!-- 输入区 -->
+        <div class="p-4 glass-effect border-t border-gray-800">
+            <div class="relative">
+                <input v-model="input" @keyup.enter="send" type="text" placeholder="输入你的困惑..." 
+                    class="w-full bg-gray-800 text-white rounded-full py-3 pl-5 pr-12 focus:outline-none focus:ring-1 focus:ring-purple-500 border border-gray-700">
+                <button @click="send" :disabled="loading" class="absolute right-2 top-1.5 w-9 h-9 bg-purple-600 rounded-full flex items-center justify-center transition hover:bg-purple-500">➤</button>
+            </div>
+        </div>
+
+        <!-- 💰 支付弹窗 -->
+        <div v-if="showPay" class="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm transition-all" @click.self="closePay">
+            <div class="bg-gray-800 w-full sm:w-80 sm:rounded-2xl rounded-t-3xl p-6 border-t sm:border border-gray-700 shadow-2xl slide-up h-[480px] flex flex-col">
+                
+                <div class="w-12 h-1 bg-gray-600 rounded-full mx-auto mb-4 sm:hidden"></div>
+                
+                <!-- 阶段 1: 选方式 -->
+                <div v-if="payStep === 1" class="flex-1 flex flex-col">
+                    <h3 class="text-xl font-bold text-center mb-1 text-white">补充灵感能量</h3>
+                    <p class="text-gray-400 text-xs text-center mb-6">自觉付费，感谢支持个人开发者</p>
+                    
+                    <div class="space-y-3 flex-1">
+                        <button @click="showQrCode('wechat', 9.9)" class="w-full bg-[#07C160] hover:bg-[#06ad56] text-white p-4 rounded-xl flex items-center justify-between transition shadow-lg">
+                            <div class="flex items-center gap-3">
+                                <span class="text-2xl">💬</span>
+                                <div class="text-left">
+                                    <div class="font-bold text-sm">微信支付</div>
+                                </div>
+                            </div>
+                            <div class="font-bold">¥9.9</div>
+                        </button>
+
+                        <button @click="showQrCode('alipay', 9.9)" class="w-full bg-[#1677FF] hover:bg-[#1366dc] text-white p-4 rounded-xl flex items-center justify-between transition shadow-lg">
+                            <div class="flex items-center gap-3">
+                                <span class="text-2xl">💳</span>
+                                <div class="text-left">
+                                    <div class="font-bold text-sm">支付宝</div>
+                                </div>
+                            </div>
+                            <div class="font-bold">¥9.9</div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 阶段 2: 扫码 + 确认 -->
+                <div v-if="payStep === 2" class="flex-1 flex flex-col items-center text-center">
+                    <button @click="payStep = 1" class="self-start text-gray-400 text-sm mb-2">← 返回</button>
+                    <h3 class="text-lg font-bold text-white mb-2">
+                        请扫码支付 <span class="text-yellow-400 text-xl">¥{{ currentAmount }}</span>
+                    </h3>
+                    
+                    <!-- 🟢 图片显示区域 -->
+                    <div class="bg-white p-2 rounded-lg mb-4 shadow-inner relative overflow-hidden w-48 h-48 flex items-center justify-center">
+                        <img v-if="currentQrImg" :src="currentQrImg" class="w-full h-full object-contain" alt="收款码" @error="handleImgError">
+                        <div v-else class="text-black text-xs">加载失败</div>
+                    </div>
+                    
+                    <p class="text-xs text-gray-400 mb-4">付款后点击下方按钮，系统将自动核销</p>
+                    <button @click="confirmPay" :disabled="payLoading" class="w-full bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white font-bold py-3 rounded-lg text-sm shadow-lg transition">
+                        {{ payLoading ? '正在确认...' : '✅ 我已支付，立即到账' }}
+                    </button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, nextTick } = Vue;
+        // 🟢 自动检测当前服务器地址，确保图片能加载
+        const API_BASE = window.location.origin.includes('file') ? 'http://localhost:8000' : '';
+
+        createApp({
+            setup() {
+                const credits = ref(0);
+                const messages = ref([]);
+                const input = ref('');
+                const loading = ref(false);
+                const showPay = ref(false);
+                const payStep = ref(1);
+                const currentQrImg = ref('');
+                const currentAmount = ref(9.9);
+                const payLoading = ref(false);
+                const chatContainer = ref(null);
+                let userId = localStorage.getItem("uid") || "u_" + Math.random().toString(36).slice(2);
+                localStorage.setItem("uid", userId);
+
+                // 🟢 核心修改：这里直接填图片文件名
+                // 浏览器会自动去服务器请求 http://域名/wechat.jpg
+                const QR_IMAGES = {
+                    wechat: `${API_BASE}/wechat.jpg`,
+                    alipay: `${API_BASE}/alipay.jpg`
+                };
+
+                const scrollToBottom = async () => {
+                    await nextTick();
+                    if(chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+                };
+
+                const init = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/api/init`, {
+                            method: "POST",
+                            headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({user_id: userId})
+                        });
+                        const data = await res.json();
+                        credits.value = data.credits;
+                    } catch (e) {}
+                };
+
+                const send = async () => {
+                    if (!input.value.trim() || loading.value) return;
+                    if (credits.value <= 0) { showPay.value = true; return; }
+                    const q = input.value;
+                    input.value = '';
+                    messages.value.push({role: 'user', content: q});
+                    loading.value = true;
+                    scrollToBottom();
+                    try {
+                        const res = await fetch(`${API_BASE}/api/chat`, {
+                            method: "POST",
+                            headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({user_id: userId, question: q})
+                        });
+                        if (res.status === 402) { showPay.value = true; } 
+                        else {
+                            const data = await res.json();
+                            messages.value.push({role: 'ai', content: data.answer});
+                            credits.value = data.remaining_credits;
+                        }
+                    } catch (e) { messages.value.push({role: 'ai', content: "⚠️ 网络断开"}); } 
+                    finally { loading.value = false; scrollToBottom(); }
+                };
+
+                const showQrCode = (type, amount) => {
+                    // 添加时间戳防止浏览器缓存旧图片
+                    currentQrImg.value = `${QR_IMAGES[type]}?t=${new Date().getTime()}`;
+                    currentAmount.value = amount;
+                    payStep.value = 2;
+                };
+
+                const handleImgError = (e) => {
+                    // 如果图片加载失败（比如你还没放图片），显示提示
+                    e.target.style.display = 'none';
+                    e.target.parentElement.innerHTML = '<div class="text-red-500 text-xs p-4">❌ 未找到图片<br>请将 wechat.jpg / alipay.jpg<br>放入服务器文件夹</div>';
+                };
+
+                const closePay = () => { showPay.value = false; payStep.value = 1; };
+
+                const confirmPay = async () => {
+                    payLoading.value = true;
+                    try {
+                        const res = await fetch(`${API_BASE}/api/pay`, {
+                            method: "POST",
+                            headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({user_id: userId, amount: currentAmount.value})
+                        });
+                        const data = await res.json();
+                        if (data.status === 'success') {
+                            alert(data.msg);
+                            credits.value = data.new_balance;
+                            closePay();
+                        }
+                    } catch(e) { alert("网络错误"); }
+                    finally { payLoading.value = false; }
+                };
+
+                onMounted(init);
+                return { credits, messages, input, loading, chatContainer, showPay, payStep, currentQrImg, currentAmount, payLoading, showQrCode, closePay, confirmPay, send, handleImgError };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
